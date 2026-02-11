@@ -156,6 +156,11 @@ export function gweiFromWei(wei: string): string {
   }
 }
 
+
+export async function getRuntimeBytecode(address: string): Promise<string> {
+  const code = await rpcCall("eth_getCode", [address, "latest"]);
+  return typeof code === "string" ? code.toLowerCase() : "0x";
+}
 export async function ethCall(to: string, data: string): Promise<string> {
   return rpcCall("eth_call", [{ to, data }, "latest"]);
 }
