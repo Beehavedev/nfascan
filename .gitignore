@@ -1,0 +1,13 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+.cache
+.config
+replit.md
+.replit
+replit.nix
+.upm
+generated-icon.png
