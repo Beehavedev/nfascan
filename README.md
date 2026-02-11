@@ -10,6 +10,8 @@ The core mission is filtering genuine BAP-578 compliant agents from fake ones us
 - **BAP-578 Compliance Detection** - Scans contract ABIs for actual BAP-578 interface functions (executeAction, fundAgent, updateLearningTree, verifyLearning, etc.)
 - **Trust Score System** - 0-100 scoring based on verified source code (+30), ERC-8004 registration (+25), Merkle learning type (+20), learning root (+10), learning model (+10), cross-chain support (+5)
 - **NFA Discovery** - Sequential token ID probing of the official BAP-578 NFA contract to discover real agents
+- **Cursor Pagination** - Public list endpoints support `cursor` in addition to `limit/offset` for stable paging
+- **API Rate Limiting** - Built-in per-IP API throttling for public endpoints
 - **ERC-8004 Identity Verification** - Only agents registered in the real ERC-8004 Identity Registry get verified status
 - **Agent Classification** - Dual-path architecture: Merkle Tree Learning (evolving agents) vs JSON Light Memory (static agents)
 
@@ -98,6 +100,8 @@ npm run db:push
 | `GET /api/tx/:txHash` | Single transaction |
 | `GET /api/receipts?limit=N&offset=N` | Global receipts |
 | `GET /api/search?q=term` | Search agents |
+| `GET /api/agents/:address/trust` | Per-agent trust score explainability + tx evidence |
+| `GET /api/health/index` | Indexer health (chain head, lag, sync state) |
 
 ## Trust Score System
 

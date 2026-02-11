@@ -8,6 +8,9 @@ import { storage } from "./storage";
 
 const app = express();
 const httpServer = createServer(app);
+const apiRateLimitWindowMs = 60_000;
+const apiRateLimitMax = 120;
+const apiRateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
 declare module "http" {
   interface IncomingMessage {
@@ -24,6 +27,38 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api")) return next();
+
+  const now = Date.now();
+  const forwardedFor = req.headers["x-forwarded-for"];
+  const clientIp = typeof forwardedFor === "string"
+    ? forwardedFor.split(",")[0].trim()
+    : req.ip || req.socket.remoteAddress || "unknown";
+  const entry = apiRateLimitStore.get(clientIp);
+
+  if (!entry || entry.resetAt <= now) {
+    apiRateLimitStore.set(clientIp, { count: 1, resetAt: now + apiRateLimitWindowMs });
+    res.setHeader("X-RateLimit-Limit", apiRateLimitMax.toString());
+    res.setHeader("X-RateLimit-Remaining", (apiRateLimitMax - 1).toString());
+    return next();
+  }
+
+  entry.count += 1;
+  apiRateLimitStore.set(clientIp, entry);
+
+  const remaining = Math.max(0, apiRateLimitMax - entry.count);
+  res.setHeader("X-RateLimit-Limit", apiRateLimitMax.toString());
+  res.setHeader("X-RateLimit-Remaining", remaining.toString());
+  res.setHeader("X-RateLimit-Reset", Math.ceil(entry.resetAt / 1000).toString());
+
+  if (entry.count > apiRateLimitMax) {
+    return res.status(429).json({ message: "Rate limit exceeded. Try again shortly." });
+  }
+
+  return next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

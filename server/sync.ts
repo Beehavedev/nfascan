@@ -4,6 +4,8 @@ import {
   getBlockByNumber,
   getContractSourceCode,
   getBalance,
+  getRuntimeBytecode,
+  getContractTransactions,
   isContract,
   weiToEther,
   gweiFromWei,
@@ -59,6 +61,32 @@ const BAP578_SELECTORS: Record<string, string> = {
 };
 
 const BAP578_SELECTOR_SET = new Set(Object.keys(BAP578_SELECTORS));
+
+const BAP578_EVENT_HINTS: Record<string, string[]> = {
+  updateLearningTree: ["updatelearningtree", "learning", "merkle", "snapshot"],
+  verifyLearning: ["verifylearning", "learningverified", "proof"],
+};
+
+function selectorsPresentInBytecode(bytecode: string): string[] {
+  if (!bytecode || bytecode === "0x") return [];
+  return Object.keys(BAP578_SELECTORS).filter((selector) => bytecode.includes(selector.slice(2).toLowerCase()));
+}
+
+function checkBehaviorConsistency(claimedMethod: string, txs: any[]): { hasCalls: boolean; hasEventHints: boolean } {
+  const matched = txs.filter((tx: any) => deriveMethodName(tx.input || "0x") === claimedMethod);
+  if (matched.length === 0) return { hasCalls: false, hasEventHints: false };
+
+  const hints = BAP578_EVENT_HINTS[claimedMethod] || [];
+  const hasEventHints = matched.some((tx: any) => {
+    const fn = (tx.functionName || "").toLowerCase();
+    const logs = (tx.logs || "").toLowerCase();
+    const method = (tx.methodId || "").toLowerCase();
+    const haystack = `${fn} ${logs} ${method}`;
+    return hints.some((hint) => haystack.includes(hint));
+  });
+
+  return { hasCalls: true, hasEventHints };
+}
 
 function deriveMethodName(input: string): string {
   if (!input || input === "0x" || input.length < 10) return "transfer";
@@ -310,8 +338,12 @@ async function processBlock(blockNumber: number): Promise<{ contractAddresses: S
 
 async function enrichContract(address: string): Promise<void> {
   try {
-    const contractInfo = await getContractSourceCode(address);
-    const balance = await getBalance(address);
+    const [contractInfo, balance, runtimeBytecode, txHistory] = await Promise.all([
+      getContractSourceCode(address),
+      getBalance(address),
+      getRuntimeBytecode(address),
+      getContractTransactions(address, 0, 99999999, 1, 50, "desc"),
+    ]);
 
     const verified = !!(contractInfo && contractInfo.sourceCode && contractInfo.sourceCode !== "");
     const compliance = checkBap578Compliance(contractInfo);
@@ -338,6 +370,21 @@ async function enrichContract(address: string): Promise<void> {
     description += verified
       ? `Verified BSC contract${contractInfo?.contractName ? ` (${contractInfo.contractName})` : ""}. Compiler: ${compiler || "unknown"}.`
       : `Unverified BSC contract at ${address}.`;
+
+    const selectorHits = selectorsPresentInBytecode(runtimeBytecode);
+    if (selectorHits.length > 0) {
+      const namedHits = selectorHits.map((selector) => BAP578_SELECTORS[selector]).filter(Boolean);
+      description += ` Bytecode selector hits: ${namedHits.join(", ")}.`;
+    }
+
+    if (compliance.bap578Score > 0) {
+      const learningConsistency = checkBehaviorConsistency("updateLearningTree", txHistory);
+      if (learningConsistency.hasCalls && !learningConsistency.hasEventHints) {
+        description += " Warning: updateLearningTree calls observed without matching learning event hints in recent tx history.";
+      } else if (learningConsistency.hasCalls && learningConsistency.hasEventHints) {
+        description += " updateLearningTree behavior has matching learning event hints in recent tx history.";
+      }
+    }
 
     const isProxy = contractInfo?.proxy === "1" || contractInfo?.implementation !== "";
     const logicAddress = isProxy && contractInfo?.implementation ? contractInfo.implementation : null;
